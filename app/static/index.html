@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Music Scanner</title>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #171920; --panel2: #1f222b; --text: #e9eaf0; --muted: #9096a6;
+    --line: #2b2f3a; --accent: #7c5cff; --ai: #ff4d6d; --human: #2ecc8f; --warn: #f5b942;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f5f6fa; --panel: #fff; --panel2: #f0f1f6; --text: #16181d; --muted: #5d6475; --line: #dfe2ea; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type=url], select { flex: 1 1 260px; min-width: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; }
+  select { flex: 0 0 auto; }
+  button { padding: 11px 18px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 14px; padding: 34px 16px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
+  .drop strong { color: var(--text); }
+  .label { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+  .head { display: flex; gap: 14px; align-items: center; }
+  .cover { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--panel2); flex: none; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .verdict { margin-left: auto; text-align: right; flex: none; }
+  .pct { font-size: 30px; font-weight: 700; line-height: 1; }
+  .tag { display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .ai .pct { color: var(--ai); } .ai .tag { background: color-mix(in srgb, var(--ai) 18%, transparent); color: var(--ai); }
+  .human .pct { color: var(--human); } .human .tag { background: color-mix(in srgb, var(--human) 18%, transparent); color: var(--human); }
+  .bar { height: 8px; border-radius: 99px; background: linear-gradient(90deg, var(--human), var(--warn), var(--ai)); margin: 16px 0 4px; position: relative; }
+  .bar i { position: absolute; top: -4px; width: 4px; height: 16px; border-radius: 2px; background: var(--text); transform: translateX(-2px); }
+  .scale { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  details { margin-top: 12px; } summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  canvas { width: 100%; height: 140px; display: block; margin-top: 10px; }
+  .notes { margin: 10px 0 0; padding-left: 18px; color: var(--warn); font-size: 13px; }
+  .err { color: var(--ai); }
+  .spin { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; margin-left: auto; flex: none; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI Music Scanner</h1>
+  <p class="sub">Erkennt mit Suno/Udio generierte Musik anhand von Vocoder-Artefakten im Frequenzspektrum.</p>
+
+  <section class="panel">
+    <p class="label">Spotify-, YouTube- oder SoundCloud-Link</p>
+    <form id="linkForm" class="row">
+      <input id="url" type="url" required placeholder="https://open.spotify.com/track/…">
+      <select id="prefer" title="Audioquelle für Spotify-Links">
+        <option value="auto">Ganzer Song (YouTube), sonst Preview</option>
+        <option value="youtube">Nur ganzer Song (YouTube)</option>
+        <option value="preview">Nur 30s Spotify-Preview</option>
+      </select>
+      <button id="linkBtn">Scannen</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <p class="label">Oder Dateien hochladen</p>
+    <label id="drop" class="drop">
+      <input id="files" type="file" accept=".mp3,.wav,.flac,.ogg,.m4a,.aac,.opus,audio/*" multiple hidden>
+      <strong>MP3 / WAV hier ablegen</strong> oder klicken zum Auswählen<br>
+      <small>Auch FLAC, OGG, M4A · mehrere Dateien möglich · am besten der ganze Song (min. 10 s)</small>
+    </label>
+  </section>
+
+  <div id="results"></div>
+
+  <footer>
+    Modell: <a href="https://github.com/lofcz/ai-music-detector" target="_blank" rel="noopener">lofcz/ai-music-detector</a>
+    (MIT) · trainiert auf Suno ≤ 5 und Udio ≤ 1.5. Ergebnis ist eine Wahrscheinlichkeit, kein Beweis – andere Generatoren
+    oder stark nachbearbeitete Songs können falsch eingeschätzt werden.
+  </footer>
+</main>
+
+<template id="tpl">
+  <div class="card">
+    <div class="head">
+      <img class="cover" alt="" hidden>
+      <div style="min-width:0">
+        <div class="name"></div>
+        <div class="meta"></div>
+      </div>
+      <div class="spin"></div>
+    </div>
+    <div class="body"></div>
+  </div>
+</template>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const results = $("#results");
+const queue = [];
+let busy = false;
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function newCard(name, meta) {
+  const node = $("#tpl").content.firstElementChild.cloneNode(true);
+  node.querySelector(".name").textContent = name;
+  node.querySelector(".meta").textContent = meta;
+  results.prepend(node);
+  return node;
+}
+
+function enqueue(job) { queue.push(job); pump(); }
+async function pump() {
+  if (busy || !queue.length) return;
+  busy = true;
+  const job = queue.shift();
+  try { await job(); } finally { busy = false; pump(); }
+}
+
+async function run(card, request) {
+  card.querySelector(".meta").textContent = "Wird analysiert …";
+  try {
+    const res = await request();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Fehler ${res.status}`);
+    render(card, data);
+  } catch (e) {
+    card.querySelector(".spin").remove();
+    card.querySelector(".meta").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  }
+}
+
+const SOURCES = { upload: "Upload", youtube: "Via YouTube", "spotify-preview": "Spotify-Preview (30 s)", link: "Link" };
+
+function render(card, d) {
+  card.querySelector(".spin").remove();
+  if (d.title) card.querySelector(".name").textContent = d.title;
+  if (d.cover_url) { const img = card.querySelector(".cover"); img.src = d.cover_url; img.hidden = false; }
+  card.querySelector(".meta").textContent =
+    `${SOURCES[d.source] || d.source} · ${d.duration_analyzed.toFixed(0)} s analysiert · ${(d.processing_ms / 1000).toFixed(1)} s` +
+    (d.detail && d.source !== "upload" ? ` · ${d.detail}` : "");
+
+  const pct = Math.round(d.probability * 1000) / 10;
+  const v = document.createElement("div");
+  v.className = "verdict " + (d.is_ai ? "ai" : "human");
+  v.innerHTML = `<div class="pct">${pct}%</div><div class="tag">${esc(d.label)}</div>`;
+  card.querySelector(".head").append(v);
+
+  const body = card.querySelector(".body");
+  body.innerHTML = `
+    <div class="bar"><i style="left:${d.probability * 100}%"></i></div>
+    <div class="scale"><span>menschlich</span><span>AI-Wahrscheinlichkeit · Sicherheit ${Math.round(d.confidence * 100)}%</span><span>AI</span></div>
+    ${d.notes?.length ? `<ul class="notes">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+    <details><summary>Fakeprint anzeigen (Spektrum-Artefakte 1–8 kHz)</summary><canvas></canvas>
+      <div class="meta">Regelmäßige, scharfe Spitzen deuten auf Upsampling-Artefakte neuronaler Vocoder hin.</div></details>`;
+  const det = body.querySelector("details");
+  det.addEventListener("toggle", () => det.open && plot(det.querySelector("canvas"), d), { once: true });
+}
+
+function plot(canvas, d) {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const pad = 18, ys = d.fakeprint, n = ys.length;
+  ctx.strokeStyle = css.getPropertyValue("--line"); ctx.beginPath(); ctx.moveTo(0, h - pad); ctx.lineTo(w, h - pad); ctx.stroke();
+  ctx.strokeStyle = css.getPropertyValue(d.is_ai ? "--ai" : "--human"); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ys.forEach((y, i) => { const x = (i / (n - 1)) * w, yy = h - pad - y * (h - pad - 4); i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); });
+  ctx.stroke();
+  ctx.fillStyle = css.getPropertyValue("--muted"); ctx.font = "11px system-ui";
+  [1, 2, 3, 4, 5, 6, 7, 8].forEach((k) => {
+    const f0 = d.fakeprint_freqs[0], f1 = d.fakeprint_freqs[n - 1];
+    const x = ((k * 1000 - f0) / (f1 - f0)) * w;
+    ctx.fillText(`${k}k`, Math.min(Math.max(x - 6, 0), w - 16), h - 4);
+  });
+}
+
+$("#linkForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const url = $("#url").value.trim(), prefer = $("#prefer").value;
+  if (!url) return;
+  const card = newCard(url, "In Warteschlange …");
+  enqueue(() => run(card, () => {
+    const fd = new FormData(); fd.append("url", url); fd.append("prefer", prefer);
+    return fetch("/api/analyze/link", { method: "POST", body: fd });
+  }));
+  $("#url").value = "";
+});
+
+function addFiles(files) {
+  for (const f of files) {
+    const card = newCard(f.name, "In Warteschlange …");
+    enqueue(() => run(card, () => {
+      const fd = new FormData(); fd.append("file", f);
+      return fetch("/api/analyze/file", { method: "POST", body: fd });
+    }));
+  }
+}
+const drop = $("#drop");
+$("#files").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
+</script>
+</body>
+</html>
